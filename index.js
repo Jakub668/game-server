@@ -1,65 +1,27 @@
-import { WebSocketServer } from "ws";
-import { randomUUID } from "crypto";
+import express from "express";
+import dotenv from "dotenv";
+import { askOpenAI } from "./openai.js";
 
-const PORT = process.env.PORT;
-const TICK_RATE = 50; // ms
+dotenv.config();
+const app = express();
+app.use(express.json());
 
-const wss = new WebSocketServer({ port: PORT });
-const players = new Map();
+app.post("/chat", async (req,res)=>{
+  const { text, profile, system, memory=[] } = req.body;
 
-console.log("Serwer WS działa na porcie", PORT);
+  const messages = [
+    { role:"system", content: system || `Jesteś AI ${profile.name}` },
+    ...memory,
+    { role:"user", content:text }
+  ];
 
-wss.on("connection", ws => {
-  const id = randomUUID();
+  const answer = await askOpenAI(messages);
 
-  players.set(id, {
-    x: Math.random() * 5,
-    z: Math.random() * 5,
-    vx: 0,
-    vz: 0
-  });
-
-  // wysyłamy ID gracza
-  ws.send(JSON.stringify({
-    type: "init",
-    id
-  }));
-
-  ws.on("message", msg => {
-    const data = JSON.parse(msg);
-
-    if (data.type === "input") {
-      const p = players.get(id);
-      if (!p) return;
-
-      p.vx = data.x;
-      p.vz = data.z;
-    }
-  });
-
-  ws.on("close", () => {
-    players.delete(id);
+  res.json({
+    text: answer,
+    tts: profile.tts
   });
 });
 
-// GAME LOOP
-setInterval(() => {
-  for (const p of players.values()) {
-    p.x += p.vx * 0.1;
-    p.z += p.vz * 0.1;
-  }
-
-  const snapshot = {
-    type: "state",
-    players: Object.fromEntries(players)
-  };
-
-  const payload = JSON.stringify(snapshot);
-
-  wss.clients.forEach(client => {
-    if (client.readyState === 1) {
-      client.send(payload);
-    }
-  });
-}, TICK_RATE);
+app.listen(3000);
 
